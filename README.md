@@ -1,4 +1,4 @@
-# `il2dump` ![il2dump on crates.io](https://img.shields.io/crates/v/il2dump)
+# `il2dump` [![il2dump on crates.io](https://img.shields.io/crates/v/il2dump)](https://crates.io/crates/il2dump)
 
 A portable version of [**Il2CppDumper**](https://github.com/Perfare/Il2CppDumper) rewritten in Rust. It compiles to a single, standalone native binary with zero runtime dependencies, allowing you to build and use it on Windows, Linux, and macOS using standard tools.
 
