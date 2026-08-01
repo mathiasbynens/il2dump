@@ -1,0 +1,13 @@
+{
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "node build.mjs"
+	},
+	"devDependencies": {
+		"@rollup/plugin-node-resolve": "^15.2.3",
+		"@rollup/plugin-terser": "^0.4.4",
+		"html-minifier-terser": "^7.2.0",
+		"rollup": "^4.9.6"
+	}
+}
