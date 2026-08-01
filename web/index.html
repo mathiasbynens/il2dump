@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>il2dump online</title>
+		<meta name="viewport" content="width=device-width" />
+		<link rel="stylesheet" href="style.css" />
+	</head>
+	<body>
+		<main>
+			<h1><code>il2dump</code> online</h1>
+			<p class="subtitle">
+				A portable IL2CPP dumper running completely in your browser via
+				WebAssembly.
+			</p>
+
+			<section class="drop-zones" aria-label="File uploads">
+				<label id="exec-zone" class="drop-zone">
+					<span class="drop-zone-text"
+						>Drag & drop IL2CPP binary here<br /><span class="filename-hint"
+							>e.g. <code>libil2cpp.so</code>,
+							<code>GameAssembly.dll</code></span
+						></span
+					>
+					<input type="file" id="exec-file" class="drop-zone-input" />
+				</label>
+
+				<label id="meta-zone" class="drop-zone">
+					<span class="drop-zone-text"
+						>Drag & drop <code>global-metadata.dat</code> here</span
+					>
+					<input type="file" id="meta-file" class="drop-zone-input" />
+				</label>
+			</section>
+
+			<div class="actions">
+				<button id="dump-btn" disabled>Start decompilation</button>
+			</div>
+
+			<div
+				id="status-container"
+				class="status-container hidden"
+				role="status"
+				aria-live="polite"
+			>
+				<div class="spinner"></div>
+				<p id="status-text">Ready</p>
+			</div>
+		</main>
+
+		<script type="module" src="app.mjs"></script>
+	</body>
+</html>
