@@ -1,6 +1,6 @@
 [package]
 name = "il2dump"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Mathias Bynens", "Perfare"]
 description = "A portable, in-memory IL2CPP metadata dumper and C# decompiler library and CLI tool"
