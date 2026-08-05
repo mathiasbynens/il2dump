@@ -60,8 +60,7 @@ fn write_string(writer: &mut Vec<u8>, s: &str) -> u32 {
     offset
 }
 
-#[test]
-fn test_end_to_end_mock() {
+fn run_mock_test(cyclic_declaring_type: bool) -> (String, String) {
     // 1. Compile mock_il2cpp.c.
     let target_dir =
         PathBuf::from(env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_string()));
@@ -277,7 +276,8 @@ fn test_end_to_end_mock() {
         .write_u32::<LittleEndian>(test_namespace_offset)
         .unwrap();
     type2.write_i32::<LittleEndian>(1).unwrap(); // Byval type index.
-    type2.write_i32::<LittleEndian>(-1).unwrap(); // Declaring type index.
+    let declaring_type = if cyclic_declaring_type { 1 } else { -1 };
+    type2.write_i32::<LittleEndian>(declaring_type).unwrap(); // Declaring type index.
     type2.write_i32::<LittleEndian>(-1).unwrap(); // Parent index.
     type2.write_i32::<LittleEndian>(-1).unwrap(); // Element type index.
     type2.write_i32::<LittleEndian>(-1).unwrap(); // Generic container index.
@@ -340,10 +340,21 @@ fn test_end_to_end_mock() {
     metadata_writer.extend(method2.into_inner());
 
     // 3. Run dumper.
-    let (dump_cs, _script_json) = run_dumper(&exec_bytes, &metadata_writer).unwrap();
+    run_dumper(&exec_bytes, &metadata_writer).unwrap()
+}
 
-    // 4. Assertions on generated C# dump.
+#[test]
+fn test_end_to_end_mock() {
+    // Verify that running the dumper against mock IL2CPP binary and metadata decompiles the expected classes and methods.
+    let (dump_cs, _script_json) = run_mock_test(false);
     assert!(dump_cs.contains("Namespace: TestNamespace"));
     assert!(dump_cs.contains("public class TestClass"));
     assert!(dump_cs.contains("public void TestMethod()"));
+}
+
+#[test]
+fn test_end_to_end_cyclic_declaring_type_guard() {
+    // Verify that when a type definition declares itself as its declaring type (an obfuscated or nested cycle), the decompiler terminates type name resolution cleanly without a stack overflow.
+    let (dump_cs, _script_json) = run_mock_test(true);
+    assert!(dump_cs.contains("TestClass"));
 }

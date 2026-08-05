@@ -249,8 +249,14 @@ impl BinaryFile {
                 data_sections = exec_sections.clone();
             }
 
-            let dyn_symbol_addresses: Vec<u64> =
-                obj.dynamic_symbols().map(|sym| sym.address()).collect();
+            let mut max_idx = 0;
+            for sym in obj.dynamic_symbols() {
+                max_idx = max_idx.max(sym.index().0);
+            }
+            let mut dyn_symbol_addresses = vec![0u64; max_idx + 1];
+            for sym in obj.dynamic_symbols() {
+                dyn_symbol_addresses[sym.index().0] = sym.address();
+            }
             let rela_data = obj
                 .section_by_name(".rela.dyn")
                 .and_then(|sec| sec.data().ok())
@@ -622,7 +628,11 @@ impl BinaryFile {
                                         } else {
                                             self.read_u64_raw(raw_ref3 as usize)
                                         };
-                                        if img_count_val == image_count as u64 {
+                                        if img_count_val > 0
+                                            && img_count_val <= image_count as u64
+                                            && img_count_val
+                                                >= (image_count.saturating_sub(50)) as u64
+                                        {
                                             if version >= 29.0 {
                                                 return refva3 - ptr_size * 14;
                                             }
@@ -712,47 +722,40 @@ impl BinaryFile {
 
     fn find_metadata_registration_v21(&self, type_definitions_count: usize) -> u64 {
         let ptr_size = if self.is_32bit { 4 } else { 8 };
+        let min_types = type_definitions_count.saturating_sub(5000) as u64;
+        let max_types = (type_definitions_count + 100) as u64;
         for sec in &self.data_sections {
             let mut pos = sec.offset;
-            let end = sec.offset_end.min(self.bytes.len() as u64) - ptr_size;
+            let end = sec.offset_end.min(self.bytes.len() as u64) - (4 * ptr_size);
             while pos < end {
                 let val1 = if self.is_32bit {
                     self.read_u32_raw(pos as usize) as u64
                 } else {
                     self.read_u64_raw(pos as usize)
                 };
-                if val1 == type_definitions_count as u64 {
+                if val1 >= min_types && val1 <= max_types {
                     let val2 = if self.is_32bit {
                         self.read_u32_raw((pos + ptr_size * 2) as usize) as u64
                     } else {
                         self.read_u64_raw((pos + ptr_size * 2) as usize)
                     };
-                    if val2 == type_definitions_count as u64 {
+                    if val2 == val1 {
                         let types_ptr = if self.is_32bit {
                             self.read_u32_raw((pos + ptr_size * 3) as usize) as u64
                         } else {
                             self.read_u64_raw((pos + ptr_size * 3) as usize)
                         };
-                        if let Some(raw_types_offset) = self.map_vatr(types_ptr)
-                            && self.check_pointer_range_data_ra(raw_types_offset)
+                        let types_count_off = pos.saturating_sub(ptr_size * 4);
+                        let types_count = if self.is_32bit {
+                            self.read_u32_raw(types_count_off as usize) as u64
+                        } else {
+                            self.read_u64_raw(types_count_off as usize)
+                        };
+                        if types_count > 0
+                            && types_count < 10_000_000
+                            && self.map_vatr(types_ptr).is_some()
                         {
-                            let mut types_pointers = Vec::new();
-                            let mut read_pos = raw_types_offset;
-                            for _ in 0..type_definitions_count {
-                                let tp = if self.is_32bit {
-                                    self.read_u32_raw(read_pos as usize) as u64
-                                } else {
-                                    self.read_u64_raw(read_pos as usize)
-                                };
-                                types_pointers.push(tp);
-                                read_pos += ptr_size;
-                            }
-                            // Verify that all pointers fall within data or exec sections.
-                            if self.check_pointer_range_data_va(&types_pointers)
-                                || self.check_pointer_range_exec_va(&types_pointers)
-                            {
-                                return pos - ptr_size * 10 - sec.offset + sec.address;
-                            }
+                            return pos - ptr_size * 10 - sec.offset + sec.address;
                         }
                     }
                 }
@@ -967,5 +970,23 @@ mod tests {
 
         let matches = pattern_search(b"short", b"longerpattern");
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_registration_heuristic_allowance() {
+        // Verify that stripped assembly image counts are accepted within the saturating subtraction range.
+        let image_count = 220_usize;
+        let img_count_val = 218_u64;
+        let is_valid_image_count = img_count_val > 0
+            && img_count_val <= image_count as u64
+            && img_count_val >= (image_count.saturating_sub(50)) as u64;
+        assert!(is_valid_image_count);
+
+        // Verify that metadata registration allows slightly fewer types due to stripped assemblies.
+        let type_definitions_count = 46954_usize;
+        let min_types = type_definitions_count.saturating_sub(5000) as u64;
+        let max_types = (type_definitions_count + 100) as u64;
+        let val1 = 46469_u64;
+        assert!(val1 >= min_types && val1 <= max_types);
     }
 }

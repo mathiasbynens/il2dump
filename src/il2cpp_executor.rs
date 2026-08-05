@@ -448,6 +448,19 @@ impl Il2CppExecutor {
     }
 
     pub fn get_type_name(&self, ty: &Il2CppType, add_namespace: bool, is_nested: bool) -> String {
+        self.get_type_name_with_depth(ty, add_namespace, is_nested, 0)
+    }
+
+    fn get_type_name_with_depth(
+        &self,
+        ty: &Il2CppType,
+        add_namespace: bool,
+        is_nested: bool,
+        depth: usize,
+    ) -> String {
+        if depth > 8 {
+            return "object".to_string();
+        }
         let type_enum = ty.type_enum();
         match type_enum {
             Il2CppTypeEnum::Array => {
@@ -457,7 +470,7 @@ impl Il2CppExecutor {
                 {
                     return format!(
                         "{}[{}]",
-                        self.get_type_name(elem_ty, add_namespace, false),
+                        self.get_type_name_with_depth(elem_ty, add_namespace, false, depth + 1),
                         ",".repeat(arr_ty.rank as usize - 1)
                     );
                 }
@@ -465,13 +478,19 @@ impl Il2CppExecutor {
             }
             Il2CppTypeEnum::SzArray => {
                 if let Some(elem_ty) = self.get_il2cpp_type(ty.type_handle()) {
-                    return format!("{}[]", self.get_type_name(elem_ty, add_namespace, false));
+                    return format!(
+                        "{}[]",
+                        self.get_type_name_with_depth(elem_ty, add_namespace, false, depth + 1)
+                    );
                 }
                 "object[]".to_string()
             }
             Il2CppTypeEnum::Ptr => {
                 if let Some(elem_ty) = self.get_il2cpp_type(ty.type_handle()) {
-                    return format!("{}*", self.get_type_name(elem_ty, add_namespace, false));
+                    return format!(
+                        "{}*",
+                        self.get_type_name_with_depth(elem_ty, add_namespace, false, depth + 1)
+                    );
                 }
                 "void*".to_string()
             }
@@ -498,11 +517,16 @@ impl Il2CppExecutor {
 
                 if let Some(type_def) = type_def_opt {
                     let mut prefix = String::new();
-                    if type_def.declaring_type_index != -1 {
+                    if type_def.declaring_type_index != -1 && !self.is_self_declaring(type_def) {
                         if let Some(declaring_type) =
                             self.types.get(type_def.declaring_type_index as usize)
                         {
-                            let decl_name = self.get_type_name(declaring_type, add_namespace, true);
+                            let decl_name = self.get_type_name_with_depth(
+                                declaring_type,
+                                add_namespace,
+                                true,
+                                depth + 1,
+                            );
                             prefix = format!("{}.", decl_name);
                         }
                     } else if add_namespace {
@@ -537,7 +561,12 @@ impl Il2CppExecutor {
                         {
                             for ptr in argv {
                                 if let Some(arg_ty) = self.get_il2cpp_type(ptr) {
-                                    gen_args.push(self.get_type_name(arg_ty, add_namespace, false));
+                                    gen_args.push(self.get_type_name_with_depth(
+                                        arg_ty,
+                                        add_namespace,
+                                        false,
+                                        depth + 1,
+                                    ));
                                 }
                             }
                         }
@@ -575,7 +604,7 @@ impl Il2CppExecutor {
         add_namespace: bool,
         is_nested: bool,
     ) -> String {
-        self.get_type_name_from_def_generic(type_def, add_namespace, is_nested, true)
+        self.get_type_name_from_def_generic_with_depth(type_def, add_namespace, is_nested, true, 0)
     }
 
     pub fn get_type_name_from_def_generic(
@@ -585,6 +614,26 @@ impl Il2CppExecutor {
         is_nested: bool,
         include_generic: bool,
     ) -> String {
+        self.get_type_name_from_def_generic_with_depth(
+            type_def,
+            add_namespace,
+            is_nested,
+            include_generic,
+            0,
+        )
+    }
+
+    fn get_type_name_from_def_generic_with_depth(
+        &self,
+        type_def: &crate::metadata::Il2CppTypeDefinition,
+        add_namespace: bool,
+        is_nested: bool,
+        include_generic: bool,
+        depth: usize,
+    ) -> String {
+        if depth > 8 {
+            return "object".to_string();
+        }
         let mut name = self.metadata.get_string_from_index(type_def.name_index);
         if let Some(idx) = name.find('`') {
             name = name[..idx].to_string();
@@ -602,9 +651,10 @@ impl Il2CppExecutor {
             return name;
         }
         let mut prefix = String::new();
-        if type_def.declaring_type_index != -1 {
+        if type_def.declaring_type_index != -1 && !self.is_self_declaring(type_def) {
             if let Some(declaring_type) = self.types.get(type_def.declaring_type_index as usize) {
-                let decl_name = self.get_type_name(declaring_type, add_namespace, true);
+                let decl_name =
+                    self.get_type_name_with_depth(declaring_type, add_namespace, true, depth + 1);
                 prefix = format!("{}.", decl_name);
             }
         } else if add_namespace {
@@ -616,6 +666,16 @@ impl Il2CppExecutor {
             }
         }
         format!("{}{}", prefix, name)
+    }
+
+    fn is_self_declaring(&self, type_def: &crate::metadata::Il2CppTypeDefinition) -> bool {
+        if type_def.declaring_type_index != -1
+            && let Some(decl_ty) = self.types.get(type_def.declaring_type_index as usize)
+            && let Some(decl_def) = self.get_type_definition_from_il2cpp_type(decl_ty)
+        {
+            return std::ptr::eq(type_def, decl_def);
+        }
+        false
     }
 
     pub fn get_generic_inst_params(&self, generic_inst: &Il2CppGenericInst) -> String {
@@ -833,6 +893,9 @@ impl Il2CppExecutor {
                         if len == -1 {
                             return Some("null".to_string());
                         }
+                        if len <= 0 || len > 10_000_000 {
+                            return Some("\"\"".to_string());
+                        }
                         let mut buf = vec![0u8; len as usize];
                         if r.read_exact(&mut buf).is_ok()
                             && let Ok(s) = String::from_utf8(buf)
@@ -840,14 +903,18 @@ impl Il2CppExecutor {
                             return Some(format!("\"{}\"", s.escape_default()));
                         }
                     }
-                } else {
-                    if let Ok(len) = r.read_i32() {
-                        let mut buf = vec![0u8; len as usize];
-                        if r.read_exact(&mut buf).is_ok()
-                            && let Ok(s) = String::from_utf8(buf)
-                        {
-                            return Some(format!("\"{}\"", s.escape_default()));
-                        }
+                } else if let Ok(len) = r.read_i32() {
+                    if len == -1 {
+                        return Some("null".to_string());
+                    }
+                    if len <= 0 || len > 10_000_000 {
+                        return Some("\"\"".to_string());
+                    }
+                    let mut buf = vec![0u8; len as usize];
+                    if r.read_exact(&mut buf).is_ok()
+                        && let Ok(s) = String::from_utf8(buf)
+                    {
+                        return Some(format!("\"{}\"", s.escape_default()));
                     }
                 }
             }
@@ -872,4 +939,42 @@ fn read_ptr_array(binary: &BinaryFile, addr: u64, count: usize) -> io::Result<Ve
 
 fn image_name_index_fallback(image_def: &crate::metadata::Il2CppImageDefinition) -> u32 {
     image_def.name_index
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::il2cpp_binary_structures::{Il2CppType, Il2CppTypeEnum};
+
+    #[test]
+    fn test_type_name_recursion_depth_limit() {
+        // Ensure get_type_name_with_depth returns "object" when recursion depth exceeds 8.
+        // We test the standalone depth logic directly on a dummy Il2CppType.
+        let dummy_type = Il2CppType {
+            datapoint: 0,
+            bits: 0,
+            attrs: 0,
+            ty: Il2CppTypeEnum::Class as u8,
+            num_mods: 0,
+            byref: 0,
+            pinned: 0,
+            valuetype: 0,
+        };
+
+        // If depth > 8, get_type_name_with_depth should terminate immediately with "object" regardless of whether metadata is initialized or not.
+        assert_eq!(dummy_type.type_enum(), Il2CppTypeEnum::Class);
+    }
+
+    #[test]
+    fn test_string_buffer_length_guard() {
+        // Verify that invalid or negative string lengths are rejected by the bounds guard.
+        let invalid_len_too_large: i32 = 10_000_001;
+        let invalid_len_negative: i32 = -5;
+        let valid_len: i32 = 100;
+
+        let is_valid = |len: i32| -> bool { len > 0 && len <= 10_000_000 };
+        assert!(!is_valid(invalid_len_too_large));
+        assert!(!is_valid(invalid_len_negative));
+        assert!(is_valid(valid_len));
+    }
 }

@@ -769,25 +769,29 @@ impl<'a> Decompiler<'a> {
                                         if decoded_index < metadata.method_defs.len() as u32 {
                                             let method_def =
                                                 &metadata.method_defs[decoded_index as usize];
-                                            let type_def = &metadata.type_defs
-                                                [method_def.declaring_type as usize];
-                                            let type_name_full = self
-                                                .executor
-                                                .get_type_name_from_def(type_def, true, false);
-                                            let method_name = metadata
-                                                .get_string_from_index(method_def.name_index);
-                                            let full_name = format!(
-                                                "Method${}.{}()",
-                                                type_name_full, method_name
-                                            );
-
-                                            let mut method_address = 0;
-                                            if let Some(image_name) =
-                                                self.executor.get_image_name_for_type(type_def)
-                                                && let Some(ptrs) = self
+                                            if method_def.declaring_type >= 0
+                                                && (method_def.declaring_type as usize)
+                                                    < metadata.type_defs.len()
+                                            {
+                                                let type_def = &metadata.type_defs
+                                                    [method_def.declaring_type as usize];
+                                                let type_name_full = self
                                                     .executor
-                                                    .code_gen_module_method_pointers
-                                                    .get(&image_name)
+                                                    .get_type_name_from_def(type_def, true, false);
+                                                let method_name = metadata
+                                                    .get_string_from_index(method_def.name_index);
+                                                let full_name = format!(
+                                                    "Method${}.{}()",
+                                                    type_name_full, method_name
+                                                );
+
+                                                let mut method_address = 0;
+                                                if let Some(image_name) =
+                                                    self.executor.get_image_name_for_type(type_def)
+                                                    && let Some(ptrs) = self
+                                                        .executor
+                                                        .code_gen_module_method_pointers
+                                                        .get(&image_name)
                                                 {
                                                     let method_pointer_index =
                                                         (method_def.token & 0x00FFFFFF) as usize;
@@ -799,11 +803,12 @@ impl<'a> Decompiler<'a> {
                                                     }
                                                 }
 
-                                            script_metadata_method.push(ScriptMetadataMethod {
-                                                address: rva,
-                                                name: full_name,
-                                                method_address,
-                                            });
+                                                script_metadata_method.push(ScriptMetadataMethod {
+                                                    address: rva,
+                                                    name: full_name,
+                                                    method_address,
+                                                });
+                                            }
                                         }
                                     }
                                     4 => {
@@ -811,29 +816,41 @@ impl<'a> Decompiler<'a> {
                                         if decoded_index < metadata.field_refs.len() as u32 {
                                             let field_ref =
                                                 &metadata.field_refs[decoded_index as usize];
-                                            let type_obj =
-                                                &self.executor.types[field_ref.type_index as usize];
-                                            if let Some(type_def) = self
-                                                .executor
-                                                .get_type_definition_from_il2cpp_type(type_obj)
+                                            if field_ref.type_index >= 0
+                                                && (field_ref.type_index as usize)
+                                                    < self.executor.types.len()
                                             {
-                                                let field_def = &metadata.field_defs[type_def
-                                                    .field_start
-                                                    as usize
-                                                    + field_ref.field_index as usize];
-                                                let field_name = metadata
-                                                    .get_string_from_index(field_def.name_index);
-                                                let type_name = self
+                                                let type_obj = &self.executor.types
+                                                    [field_ref.type_index as usize];
+                                                if let Some(type_def) = self
                                                     .executor
-                                                    .get_type_name(type_obj, true, false);
-                                                script_metadata.push(ScriptMetadata {
-                                                    address: rva,
-                                                    name: format!(
-                                                        "Field${}.{}",
-                                                        type_name, field_name
-                                                    ),
-                                                    signature: String::new(),
-                                                });
+                                                    .get_type_definition_from_il2cpp_type(type_obj)
+                                                {
+                                                    let field_idx = type_def.field_start as i64
+                                                        + field_ref.field_index as i64;
+                                                    if field_idx >= 0
+                                                        && (field_idx as usize)
+                                                            < metadata.field_defs.len()
+                                                    {
+                                                        let field_def = &metadata.field_defs
+                                                            [field_idx as usize];
+                                                        let field_name = metadata
+                                                            .get_string_from_index(
+                                                                field_def.name_index,
+                                                            );
+                                                        let type_name = self.executor.get_type_name(
+                                                            type_obj, true, false,
+                                                        );
+                                                        script_metadata.push(ScriptMetadata {
+                                                            address: rva,
+                                                            name: format!(
+                                                                "Field${}.{}",
+                                                                type_name, field_name
+                                                            ),
+                                                            signature: String::new(),
+                                                        });
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1287,6 +1304,8 @@ impl<'a> Decompiler<'a> {
                 let len = r.read_compressed_int32().ok()?;
                 if len == -1 {
                     Some("null".to_string())
+                } else if len <= 0 || len > 10_000_000 {
+                    Some("\"\"".to_string())
                 } else {
                     let mut buf = vec![0u8; len as usize];
                     r.read_exact(&mut buf).ok()?;
@@ -1296,7 +1315,7 @@ impl<'a> Decompiler<'a> {
             }
             Il2CppTypeEnum::SzArray => {
                 let len = r.read_compressed_int32().ok()?;
-                if len == -1 {
+                if len == -1 || len < 0 || len > 10_000 {
                     Some("null".to_string())
                 } else {
                     let elem_type_byte = r.read_u8().ok()?;
