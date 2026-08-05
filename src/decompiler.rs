@@ -1315,7 +1315,7 @@ impl<'a> Decompiler<'a> {
             }
             Il2CppTypeEnum::SzArray => {
                 let len = r.read_compressed_int32().ok()?;
-                if len == -1 || len < 0 || len > 10_000 {
+                if !(0..=10_000).contains(&len) {
                     Some("null".to_string())
                 } else {
                     let elem_type_byte = r.read_u8().ok()?;
